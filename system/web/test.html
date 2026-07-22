@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>测试页</title></head>
+<body style="background:#111;color:#eee;font-family:sans-serif;padding:40px;">
+<h1>📤 上传测试</h1>
+<p>这个页面没有任何 JavaScript，只有纯 HTML 表单。</p>
+<form action="/api/data/upload" method="POST" enctype="multipart/form-data" style="border:3px solid #6c8cff;padding:24px;border-radius:8px;margin-top:16px;">
+  <div style="margin-bottom:12px;">
+    <label>选择 Excel 文件：</label>
+    <input type="file" name="file" accept=".xlsx" required style="display:block;margin-top:4px;font-size:16px;">
+  </div>
+  <div style="margin-bottom:12px;">
+    <label>数据类型：</label>
+    <select name="type" style="display:block;margin-top:4px;font-size:16px;padding:4px;">
+      <option value="detail">纳新数据</option>
+      <option value="order">订单数据</option>
+    </select>
+  </div>
+  <button type="submit" style="background:#6c8cff;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:16px;cursor:pointer;">上传</button>
+</form>
+<hr style="margin:20px 0;">
+<p>看到这个页面说明服务器正常。如果能看到上传表单，说明浏览器支持 HTML 表单。</p>
+</body>
+</html>

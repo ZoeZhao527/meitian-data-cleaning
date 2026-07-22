@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美田运营系统</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js">
+
+// ── 表格合并 ──
+let _mergeState = { previewA: null, previewB: null };
+
+function uploadBoth() {
+  const fileA = document.getElementById('mergeFileA').files[0];
+  const fileB = document.getElementById('mergeFileB').files[0];
+  if (!fileA || !fileB) { alert('请选择两个文件'); return; }
+  document.getElementById('mergeUploadBtn').disabled = true;
+  document.getElementById('mergeUploadBtn').textContent = '上传中...';
+
+  Promise.all([uploadFile(fileA, 'file'), uploadFile(fileB, 'file')])
+    .then(([a, b]) => {
+      _mergeState.previewA = a;
+      _mergeState.previewB = b;
+      showMergePreview(a, b);
+      goMergeStep(2);
+    })
+    .catch(e => { alert('上传失败: ' + e.message); })
+    .finally(() => {
+      document.getElementById('mergeUploadBtn').disabled = false;
+      document.getElementById('mergeUploadBtn').textContent = '上传并预览';
+    });
+}
+
+function uploadFile(file, fieldName) {
+  const form = new FormData();
+  form.append(fieldName, file);
+  return fetch('/api/merge/preview', { method: 'POST', body: form }).then(r => r.json());
+}
+
+function showMergePreview(a, b) {
+  // Show headers as checkboxes
+  const colsA = document.getElementById('mergeColsA');
+  colsA.innerHTML = '<div style="margin-bottom:6px;color:var(--text2);">' + a.rows + ' 行, ' + a.columns + ' 列</div>'
+    + a.headers.map(h => '<label style="display:inline-block;margin:2px 6px 2px 0;font-size:12px;"><input type="checkbox" checked data-col="' + h + '"> ' + h + '</label>').join('');
+
+  const colsB = document.getElementById('mergeColsB');
+  colsB.innerHTML = '<div style="margin-bottom:6px;color:var(--text2);">' + b.rows + ' 行, ' + b.columns + ' 列</div>'
+    + b.headers.map(h => '<label style="display:inline-block;margin:2px 6px 2px 0;font-size:12px;"><input type="checkbox" checked data-col="' + h + '"> ' + h + '</label>').join('');
+
+  // Populate key selectors
+  const ka = document.getElementById('mergeKeyA');
+  ka.innerHTML = a.headers.map(h => '<option value="' + h + '">' + h + '</option>').join('');
+  const kb = document.getElementById('mergeKeyB');
+  kb.innerHTML = b.headers.map(h => '<option value="' + h + '">' + h + '</option>').join('');
+}
+
+function executeMerge() {
+  const a = _mergeState.previewA;
+  const b = _mergeState.previewB;
+  if (!a || !b) return;
+
+  const keyA = document.getElementById('mergeKeyA').value;
+  const keyB = document.getElementById('mergeKeyB').value;
+  const joinType = document.getElementById('mergeJoinType').value;
+
+  // Get selected columns
+  const colsA = Array.from(document.querySelectorAll('#mergeColsA input:checked')).map(el => el.dataset.col);
+  const colsB = Array.from(document.querySelectorAll('#mergeColsB input:checked')).map(el => el.dataset.col);
+
+  const form = new FormData();
+  // Re-upload files (they were already uploaded in step 1, but we stored preview paths)
+  // Actually we need to get the files again
+  const fileA = document.getElementById('mergeFileA').files[0];
+  const fileB = document.getElementById('mergeFileB').files[0];
+  form.append('file_a', fileA);
+  form.append('file_b', fileB);
+  form.append('key_a', keyA);
+  form.append('key_b', keyB);
+  form.append('join_type', joinType);
+  form.append('cols_a', JSON.stringify(colsA));
+  form.append('cols_b', JSON.stringify(colsB));
+
+  document.querySelector('#mergeConfig .gen-btn').textContent = '合并中...';
+  document.querySelector('#mergeConfig .gen-btn').disabled = true;
+
+  fetch('/api/merge/execute', { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert('错误: ' + data.error); return; }
+      showMergeResult(data);
+    })
+    .catch(e => { alert('合并失败: ' + e.message); })
+    .finally(() => {
+      document.querySelector('#mergeConfig .gen-btn').textContent = '执行合并';
+      document.querySelector('#mergeConfig .gen-btn').disabled = false;
+    });
+}
+
+function showMergeResult(data) {
+  goMergeStep(3);
+  document.getElementById('mergeStats').textContent =
+    '匹配 ' + data.match_count + ' 条, 合并结果 ' + data.total + ' 行 (A: ' + data.file_a_rows + ', B: ' + data.file_b_rows + ')';
+
+  const link = document.getElementById('mergeDownloadLink');
+  link.href = data.download_url;
+
+  const table = document.getElementById('mergeResultTable');
+  const thead = table.querySelector('thead');
+  thead.innerHTML = '<tr>' + data.headers.map(h => '<th>' + h + '</th>').join('') + '</tr>';
+  const tbody = table.querySelector('tbody');
+  const preview = data.preview || [];
+  tbody.innerHTML = preview.map(row =>
+    '<tr>' + row.map(v => '<td>' + (v ?? '') + '</td>').join('') + '</tr>'
+  ).join('');
+}
+
+function goMergeStep(step) {
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById('mergeStep' + i);
+    if (i === step) {
+      el.style.background = 'var(--accent2)';
+      el.style.color = '#fff';
+    } else {
+      el.style.background = 'var(--surface2)';
+      el.style.color = 'var(--text2)';
+    }
+  }
+  document.getElementById('mergeUpload').style.display = step === 1 ? 'block' : 'none';
+  document.getElementById('mergeConfig').style.display = step === 2 ? 'block' : 'none';
+  document.getElementById('mergeResult').style.display = step === 3 ? 'block' : 'none';
+}
+
+function resetMerge() {
+  _mergeState = { previewA: null, previewB: null };
+  document.getElementById('mergePreviewA').innerHTML = '';
+  document.getElementById('mergePreviewB').innerHTML = '';
+  document.getElementById('mergeColsA').innerHTML = '';
+  document.getElementById('mergeColsB').innerHTML = '';
+  document.getElementById('mergeResultTable').querySelector('thead').innerHTML = '';
+  document.getElementById('mergeResultTable').querySelector('tbody').innerHTML = '';
+  goMergeStep(1);
+}
+
+// File input change handlers
+document.addEventListener('DOMContentLoaded', function() {
+  // Data tab: show selected filename
+  document.getElementById('uploadDetail').addEventListener('change', function() {
+    document.getElementById('detailFileName').textContent = this.files[0] ? '已选: ' + this.files[0].name : '';
+  });
+  document.getElementById('uploadOrder').addEventListener('change', function() {
+    document.getElementById('orderFileName').textContent = this.files[0] ? '已选: ' + this.files[0].name : '';
+  });
+
+  // Merge tab: file selection UI
+  const fa = document.getElementById('mergeFileA');
+  const fb = document.getElementById('mergeFileB');
+  function updateUI() {
+    const hasA = fa.files[0];
+    const hasB = fb.files[0];
+    document.getElementById('mergeUploadBtn').disabled = !(hasA && hasB);
+    document.getElementById('mergeFileAName').textContent = hasA ? '✅ ' + fa.files[0].name : '点击选择文件 A';
+    document.getElementById('mergeFileBName').textContent = hasB ? '✅ ' + fb.files[0].name : '点击选择文件 B';
+    if (hasA && hasB) {
+      document.getElementById('mergeUploadBtn').textContent = '⚡ 上传并预览';
+    }
+  }
+  fa.addEventListener('change', updateUI);
+  fb.addEventListener('change', updateUI);
+});
+
+</script>
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d28;
+  --surface2: #232738;
+  --border: #2a2e3e;
+  --text: #e4e6ee;
+  --text2: #8b8fa3;
+  --accent: #6c8cff;
+  --accent2: #4a6cf7;
+  --green: #34d399;
+  --red: #f87171;
+  --orange: #fbbf24;
+  --radius: 8px;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* ── Layout ── */
+.app { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 220px; flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 24px 16px;
+  display: flex; flex-direction: column;
+}
+.sidebar h1 {
+  font-size: 18px; font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--accent);
+}
+.sidebar .subtitle {
+  font-size: 12px; color: var(--text2);
+  margin-bottom: 32px;
+}
+.nav { display: flex; flex-direction: column; gap: 4px; }
+.nav-btn {
+  background: none; border: none; color: var(--text2);
+  text-align: left; font-size: 14px;
+  padding: 10px 12px; border-radius: var(--radius);
+  cursor: pointer; transition: all .15s;
+}
+.nav-btn:hover { background: var(--surface2); color: var(--text); }
+.nav-btn.active { background: var(--accent2); color: #fff; }
+
+.main { flex: 1; padding: 32px; overflow-y: auto; min-width: 0; }
+
+/* ── Top Bar ── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 28px; flex-wrap: wrap; gap: 12px;
+}
+.topbar h2 { font-size: 22px; font-weight: 600; }
+.date-range {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); padding: 6px 12px;
+  border-radius: var(--radius); border: 1px solid var(--border);
+}
+.date-range input {
+  background: transparent; border: none; color: var(--text);
+  font-size: 13px; outline: none; width: 100px;
+}
+.date-range input::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+.date-range button {
+  background: var(--accent); border: none; color: #fff;
+  padding: 4px 14px; border-radius: 4px;
+  font-size: 13px; cursor: pointer;
+}
+.date-range button:hover { background: var(--accent2); }
+
+/* ── Cards ── */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 28px; }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+}
+.card .label { font-size: 13px; color: var(--text2); margin-bottom: 6px; }
+.card .value { font-size: 28px; font-weight: 700; }
+.card .sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+/* ── Charts ── */
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+.chart-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+}
+.chart-box h3 { font-size: 14px; font-weight: 500; margin-bottom: 12px; color: var(--text2); }
+.chart-box canvas { max-height: 280px; }
+
+/* ── Table ── */
+.table-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow-x: auto;
+}
+.table-wrap h3 {
+  font-size: 14px; font-weight: 500; padding: 16px 20px 0;
+  color: var(--text2);
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 12px 16px; color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+td { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface2); }
+
+/* ── Report ── */
+.report-output {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px;
+  font-size: 14px; line-height: 1.7;
+  white-space: pre-wrap;
+  max-height: 600px; overflow-y: auto;
+  display: none;
+}
+.gen-btn {
+  background: var(--accent); color: #fff; border: none;
+  padding: 10px 24px; border-radius: var(--radius);
+  font-size: 14px; cursor: pointer; margin-bottom: 16px;
+}
+.gen-btn:hover { background: var(--accent2); }
+
+/* ── Tabs ── */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Loading ── */
+.loading { text-align: center; padding: 60px 0; color: var(--text2); }
+.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Channel badges ── */
+.ch-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; background: var(--surface2); color: var(--text2);
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <h1>美田运营</h1>
+    <div class="subtitle">数据管理平台</div>
+    <nav class="nav">
+      <button class="nav-btn active" data-tab="dashboard">📊  看板</button>
+      <button class="nav-btn" data-tab="acquisition">📈  纳新分析</button>
+      <button class="nav-btn" data-tab="orders">🛒  订单分析</button>
+      <button class="nav-btn" data-tab="report">📝  报告生成</button>
+      <button class="nav-btn" data-tab="data">⚙  数据</button>
+      <button class="nav-btn" data-tab="merge">🧹  数据清洗</button>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Top bar -->
+    <div class="topbar">
+      <h2 id="pageTitle">看板</h2>
+      <div class="date-range">
+        <input type="date" id="startDate" value="2026-06-01">
+        <span style="color:var(--text2)">~</span>
+        <input type="date" id="endDate" value="2026-06-30">
+        <button onclick="refreshAll()">查询</button>
+      </div>
+    </div>
+
+    <!-- ──── Tab: Dashboard ──── -->
+    <div class="tab-content active" id="tab-dashboard">
+      <!-- 快速操作 -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px;">
+        <div onclick="switchTab('data')" style="background:linear-gradient(135deg,var(--accent2),var(--accent));border-radius:10px;padding:16px 20px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:transform .1s;">
+          <div style="font-size:28px;">📤</div>
+          <div>
+            <div style="font-size:15px;font-weight:600;color:#fff;">上传数据</div>
+            <div style="font-size:12px;color:rgba(255,255,255,.7);">更新纳新 / 订单数据源</div>
+          </div>
+        </div>
+        <div onclick="switchTab('merge')" style="background:linear-gradient(135deg,#34d399,#059669);border-radius:10px;padding:16px 20px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:transform .1s;">
+          <div style="font-size:28px;">🧹</div>
+          <div>
+            <div style="font-size:15px;font-weight:600;color:#fff;">数据清洗</div>
+            <div style="font-size:12px;color:rgba(255,255,255,.7);">合并表格、匹配相同项</div>
+          </div>
+        </div>
+        <div onclick="switchTab('report')" style="background:linear-gradient(135deg,#fbbf24,#f59e0b);border-radius:10px;padding:16px 20px;cursor:pointer;display:flex;align-items:center;gap:12px;transition:transform .1s;">
+          <div style="font-size:28px;">📝</div>
+          <div>
+            <div style="font-size:15px;font-weight:600;color:#1a1d28;">生成报告</div>
+            <div style="font-size:12px;color:rgba(0,0,0,.5);">一键出运营数据周报</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 独立上传页面入口 -->
+      <a href="/upload.html" style="display:block;background:var(--surface);border:2px solid var(--accent);border-radius:10px;padding:16px;margin-bottom:20px;text-decoration:none;transition:all .2s;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:32px;">📤</div>
+          <div>
+            <div style="font-weight:600;font-size:15px;color:var(--accent);margin-bottom:4px;">打开上传页面</div>
+            <div style="font-size:13px;color:var(--text2);">上传 Excel 文件更新数据源 / 合并清洗表格 →</div>
+          </div>
+        </div>
+      </a>
+
+      <div class="cards" id="overviewCards">
+        <div class="card"><div class="label">纳新总数</div><div class="value" id="ov-acq">—</div><div class="sub">统计周期内</div></div>
+        <div class="card"><div class="label">订单总数</div><div class="value" id="ov-orders">—</div><div class="sub">明细渠道订单</div></div>
+        <div class="card"><div class="label">到店订单</div><div class="value" id="ov-visited">—</div><div class="sub">已核销到店</div></div>
+        <div class="card"><div class="label">活动数</div><div class="value" id="ov-activities">—</div><div class="sub">进行中活动</div></div>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>纳新趋势（按周）</h3>
+          <canvas id="chartAcqTrend"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>订单趋势（按周）</h3>
+          <canvas id="chartOrderTrend"></canvas>
+        </div>
+      </div>
+
+      <div class="chart-box" style="margin-bottom:16px;">
+        <h3>纳新渠道 TOP 3</h3>
+        <div id="topChannels" style="display:flex; gap: 20px; padding: 8px 0;"></div>
+      </div>
+    </div>
+
+    <!-- ──── Tab: 纳新分析 ──── -->
+    <div class="tab-content" id="tab-acquisition">
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>纳新渠道分布</h3>
+          <canvas id="chartAcqPie"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>纳新周趋势</h3>
+          <canvas id="chartAcqBar"></canvas>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <h3>纳新渠道明细</h3>
+        <table id="acqTable">
+          <thead><tr><th>渠道</th><th>回溯数</th><th>占比</th><th>W1</th><th>W2</th><th>W3</th><th>W4</th><th>W5</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ──── Tab: 订单分析 ──── -->
+    <div class="tab-content" id="tab-orders">
+      <div class="chart-row">
+        <div class="chart-box">
+          <h3>订单渠道趋势</h3>
+          <canvas id="chartOrderLine"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>活动到店分布</h3>
+          <canvas id="chartActivity"></canvas>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <h3>订单渠道</h3>
+        <table id="orderTable">
+          <thead><tr><th>周次</th><th>短信</th><th>朋友圈</th><th>企微1v1</th><th>直播</th><th>其他企微</th><th>其他</th><th>小计</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ──── Tab: 报告生成 ──── -->
+    <div class="tab-content" id="tab-report">
+      <p style="color:var(--text2); margin-bottom:16px;">基于当前日期范围生成运营数据周报 Markdown。</p>
+      <button class="gen-btn" onclick="generateReport()">📄  生成报告</button>
+      <div id="reportLoading" class="loading" style="display:none;">
+        <div class="spinner"></div>
+        <div>正在生成报告...</div>
+      </div>
+      <div class="report-output" id="reportOutput"></div>
+    <!-- ──── Tab: 数据管理 ──── -->
+    <div class="tab-content" id="tab-data">
+      <!-- 上传区域 -->
+      <div style="background:var(--surface);border:2px dashed var(--accent);border-radius:12px;padding:28px;margin-bottom:20px;">
+        <div style="text-align:center;margin-bottom:20px;">
+          <div style="font-size:24px;font-weight:600;color:var(--accent);margin-bottom:4px;">📤 上传数据文件</div>
+          <div style="font-size:13px;color:var(--text2);">上传新的 Excel 到系统，看板数据自动切换</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:20px;text-align:center;">
+            <div style="font-size:36px;margin-bottom:8px;">📋</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">纳新明细数据</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">替换看板「纳新分析」数据源</div>
+            <div style="display:flex;gap:8px;justify-content:center;">
+              <label for="uploadDetail" style="background:var(--accent);color:#fff;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;">选择文件</label>
+              <input type="file" id="uploadDetail" accept=".xlsx" style="display:none;">
+              <button class="gen-btn" style="padding:8px 20px;font-size:13px;" onclick="uploadDataFile('detail')">上传</button>
+            </div>
+            <div id="detailFileName" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
+          </div>
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:20px;text-align:center;">
+            <div style="font-size:36px;margin-bottom:8px;">🛒</div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">到店订单数据</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">替换看板「订单分析」数据源</div>
+            <div style="display:flex;gap:8px;justify-content:center;">
+              <label for="uploadOrder" style="background:var(--accent);color:#fff;padding:8px 20px;border-radius:6px;font-size:13px;cursor:pointer;">选择文件</label>
+              <input type="file" id="uploadOrder" accept=".xlsx" style="display:none;">
+              <button class="gen-btn" style="padding:8px 20px;font-size:13px;" onclick="uploadDataFile('order')">上传</button>
+            </div>
+            <div id="orderFileName" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
+          </div>
+        </div>
+        <div id="uploadStatus" style="text-align:center;margin-top:14px;font-size:13px;"></div>
+      </div>
+
+      <!-- 当前数据源 -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;">
+        <h3 style="margin-bottom:12px;">当前数据源</h3>
+        <div id="dataSourceInfo">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- 可用数据文件 -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;">
+        <h3 style="margin-bottom:12px;">已上传的数据文件</h3>
+        <div id="dataFileList"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+
+      <!-- 渠道映射 -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;">
+        <h3 style="margin-bottom:12px;">渠道映射</h3>
+        <div id="channelMapping"></div>
+      </div>
+    </div>
+
+    <!-- ──── Tab: 数据清洗 ──── -->
+    <div class="tab-content" id="tab-merge">
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <div id="mergeStep1" style="flex:1;padding:10px;background:var(--accent2);color:#fff;border-radius:6px;text-align:center;font-size:13px;">1. 上传文件</div>
+        <div id="mergeStep2" style="flex:1;padding:10px;background:var(--surface2);color:var(--text2);border-radius:6px;text-align:center;font-size:13px;">2. 配置匹配</div>
+        <div id="mergeStep3" style="flex:1;padding:10px;background:var(--surface2);color:var(--text2);border-radius:6px;text-align:center;font-size:13px;">3. 结果预览</div>
+      </div>
+
+      <!-- Step 1: Upload (redesigned with visible drop zones) -->
+      <div id="mergeUpload">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <label for="mergeFileA" style="display:block;border:2px dashed var(--accent);border-radius:12px;padding:32px 16px;text-align:center;cursor:pointer;background:var(--surface);transition:all .2s;">
+            <div style="font-size:32px;margin-bottom:8px;">📂</div>
+            <div id="mergeFileAName" style="font-size:14px;font-weight:500;color:var(--text);margin-bottom:4px;">点击选择文件 A</div>
+            <div style="font-size:12px;color:var(--text2);">支持 .xlsx / .xls 格式</div>
+            <input type="file" id="mergeFileA" accept=".xlsx,.xls" style="display:none;">
+          </label>
+          <label for="mergeFileB" style="display:block;border:2px dashed var(--accent);border-radius:12px;padding:32px 16px;text-align:center;cursor:pointer;background:var(--surface);transition:all .2s;">
+            <div style="font-size:32px;margin-bottom:8px;">📂</div>
+            <div id="mergeFileBName" style="font-size:14px;font-weight:500;color:var(--text);margin-bottom:4px;">点击选择文件 B</div>
+            <div style="font-size:12px;color:var(--text2);">支持 .xlsx / .xls 格式</div>
+            <input type="file" id="mergeFileB" accept=".xlsx,.xls" style="display:none;">
+          </label>
+        </div>
+        <div id="mergeFileInfo" style="display:none;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+          <div id="mergePreviewA" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;color:var(--text2);"></div>
+          <div id="mergePreviewB" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;color:var(--text2);"></div>
+        </div>
+        <div style="text-align:center;margin-top:16px;">
+          <button class="gen-btn" onclick="uploadBoth()" id="mergeUploadBtn" disabled>⚡ 开始处理</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Config -->
+      <div id="mergeConfig" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div class="chart-box">
+            <h3>文件 A 列</h3>
+            <div id="mergeColsA" style="font-size:13px;max-height:300px;overflow-y:auto;"></div>
+          </div>
+          <div class="chart-box">
+            <h3>文件 B 列</h3>
+            <div id="mergeColsB" style="font-size:13px;max-height:300px;overflow-y:auto;"></div>
+          </div>
+        </div>
+        <div class="chart-box" style="margin-bottom:16px;">
+          <h3>匹配设置</h3>
+          <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+            <div>
+              <label style="font-size:13px;color:var(--text2);display:block;margin-bottom:4px;">文件 A 匹配列</label>
+              <select id="mergeKeyA" style="width:180px;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:13px;"></select>
+            </div>
+            <div style="font-size:20px;color:var(--text2);">↔</div>
+            <div>
+              <label style="font-size:13px;color:var(--text2);display:block;margin-bottom:4px;">文件 B 匹配列</label>
+              <select id="mergeKeyB" style="width:180px;padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:13px;"></select>
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--text2);display:block;margin-bottom:4px;">合并方式</label>
+              <select id="mergeJoinType" style="padding:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:13px;">
+                <option value="inner">内连接（仅匹配项）</option>
+                <option value="left">左连接（保留 A 全部）</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:center;">
+          <button class="gen-btn" onclick="executeMerge()">▶ 执行匹配</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Result -->
+      <div id="mergeResult" style="display:none;">
+        <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+          <span id="mergeStats" style="font-size:14px;color:var(--text2);"></span>
+          <a id="mergeDownloadLink" style="padding:8px 20px;background:var(--accent);color:#fff;border-radius:6px;text-decoration:none;font-size:13px;">📥 下载 CSV</a>
+          <button onclick="resetMerge()" style="padding:8px 20px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;">↺ 重新开始</button>
+        </div>
+        <div class="table-wrap" style="max-height:500px;overflow:auto;">
+          <table id="mergeResultTable"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ── State ──
+let charts = {};
+
+function getRange() {
+  return {
+    start: document.getElementById('startDate').value,
+    end: document.getElementById('endDate').value,
+  };
+}
+
+// ── API ──
+async function api(path, params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  const url = qs ? `/api${path}?${qs}` : `/api${path}`;
+  const r = await fetch(url);
+  return r.json();
+}
+
+// ── Navigation ──
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    document.getElementById('pageTitle').textContent = btn.textContent.trim();
+    refreshAll();
+  });
+});
+
+// ── Tab navigation helper ──
+function switchTab(tabId) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.nav-btn[data-tab="${tabId}"]`).classList.add('active');
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${tabId}`).classList.add('active');
+  document.getElementById('pageTitle').textContent = document.querySelector(`.nav-btn[data-tab="${tabId}"]`).textContent.trim();
+  refreshAll();
+}
+
+// ── Refresh ──
+async function refreshAll() {
+  const active = document.querySelector('.tab-content.active');
+  if (active.id === 'tab-dashboard') await loadDashboard();
+  else if (active.id === 'tab-acquisition') await loadAcquisition();
+  else if (active.id === 'tab-orders') await loadOrders();
+  else if (active.id === 'tab-data') await loadData();
+}
+
+async function loadDashboard() {
+  const { start, end } = getRange();
+  const data = await api('/overview', { start, end });
+  document.getElementById('ov-acq').textContent = data['纳新总数'] ?? '—';
+  document.getElementById('ov-orders').textContent = data['订单总数'] ?? '—';
+  document.getElementById('ov-visited').textContent = data['到店订单数'] ?? '—';
+  document.getElementById('ov-activities').textContent = data['活动数'] ?? '—';
+
+  // Top channels
+  const tc = document.getElementById('topChannels');
+  tc.innerHTML = (data['纳新渠道TOP3'] || []).map((ch, i) =>
+    `<div style="flex:1;background:var(--surface2);border-radius:8px;padding:14px;text-align:center;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">${['🥇','🥈','🥉'][i]} ${ch.name}</div>
+      <div style="font-size:24px;font-weight:700;">${ch.count}</div>
+      <div style="font-size:12px;color:var(--text2);">回溯数</div>
+    </div>`
+  ).join('');
+
+  // Trends
+  renderLine('chartAcqTrend', data['纳新趋势']?.weeks || [], data['纳新趋势']?.values || [], '纳新数', '#6c8cff');
+  renderLine('chartOrderTrend', data['订单趋势']?.weeks || [], data['订单趋势']?.values || [], '订单数', '#34d399');
+}
+
+async function loadAcquisition() {
+  const { start, end } = getRange();
+  const data = await api('/acquisition', { start, end });
+  if (!data || !data.by_channel) return;
+
+  // Pie
+  const labels = Object.keys(data.by_channel);
+  const values = Object.values(data.by_channel);
+  renderPie('chartAcqPie', labels, values);
+
+  // Bar
+  const weeks = data.weeks || [];
+  renderBar('chartAcqBar', weeks,
+    labels.map(ch => ({
+      label: ch,
+      data: weeks.map(w => (data.by_week[ch] || {})[w] || 0),
+    }))
+  );
+
+  // Table
+  const tbody = document.querySelector('#acqTable tbody');
+  tbody.innerHTML = labels.map(ch => {
+    const count = data.by_channel[ch];
+    const pct = data.total ? (count / data.total * 100).toFixed(0) : 0;
+    return `<tr>
+      <td><span class="ch-badge">${ch}</span></td>
+      <td><strong>${count}</strong></td>
+      <td>${pct}%</td>
+      ${weeks.map(w => `<td>${(data.by_week[ch] || {})[w] || 0}</td>`).join('')}
+    </tr>`;
+  }).join('');
+}
+
+async function loadOrders() {
+  const { start, end } = getRange();
+  const data = await api('/orders', { start, end });
+  if (!data || !data.orders) return;
+
+  const od = data.orders;
+  const weeks = od.weeks || [];
+  const chs = od.channels || [];
+
+  // Line chart
+  renderMultiLine('chartOrderLine', weeks, chs.map(ch => ({
+    label: ch,
+    data: weeks.map(w => (od.weekly[w] || {})[ch] || 0),
+  })));
+
+  // Activity pie
+  const acts = data.activities || {};
+  renderPie('chartActivity', Object.keys(acts), Object.values(acts));
+
+  // Table
+  const tbody = document.querySelector('#orderTable tbody');
+  tbody.innerHTML = weeks.map(w => {
+    const cells = chs.map(ch => (od.weekly[w] || {})[ch] || 0);
+    const total = cells.reduce((a,b) => a+b, 0);
+    return `<tr>
+      <td>${w}</td>
+      ${cells.map(v => `<td>${v}</td>`).join('')}
+      <td><strong>${total}</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+async function generateReport() {
+  const { start, end } = getRange();
+  const el = document.getElementById('reportOutput');
+  const loading = document.getElementById('reportLoading');
+  el.style.display = 'none';
+  loading.style.display = 'block';
+
+  try {
+    const r = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start, end, month: start.substring(0, 7) }),
+    });
+    const md = await r.text();
+    el.textContent = md;
+    el.style.display = 'block';
+  } catch(e) {
+    el.textContent = '生成失败: ' + e.message;
+    el.style.display = 'block';
+  }
+  loading.style.display = 'none';
+}
+
+async function loadData() {
+  try {
+    const d = await api('/config');
+    const info = document.getElementById('dataSourceInfo');
+    info.innerHTML = '<table><tbody>'
+      + '<tr><td>明细数据</td><td>' + d.detail_file + '</td><td>' + (d.detail_exists ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>') + '</td></tr>'
+      + '<tr><td>订单数据</td><td>' + d.order_file + '</td><td>' + (d.order_exists ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>') + '</td></tr>'
+      + '<tr><td>配置文件</td><td>' + d.config_path + '</td><td><span style="color:var(--green)">✓</span></td></tr>'
+      + '</tbody></table>';
+
+    const mapping = document.getElementById('channelMapping');
+    const map = d.channel_mapping || {};
+    const rows = Object.entries(map).map(([k, v]) =>
+      '<tr><td><span class="ch-badge">' + k + '</span></td><td>→</td><td><span class="ch-badge">' + v + '</span></td></tr>'
+    ).join('');
+    mapping.innerHTML = '<table><thead><tr><th>原始渠道</th><th></th><th>报告分类</th></tr></thead><tbody>' + rows + '</tbody></table>';
+
+    // Load file list
+    const files = await api('/data/files');
+    const fl = document.getElementById('dataFileList');
+    if (files.available && files.available.length > 0) {
+      fl.innerHTML = '<table><thead><tr><th>文件名</th><th>大小</th><th>修改时间</th></tr></thead><tbody>'
+        + files.available.map(f => '<tr><td>' + f.name + '</td><td>' + (f.size / 1024).toFixed(0) + ' KB</td><td>' + f.modified + '</td></tr>').join('')
+        + '</tbody></table>';
+    } else {
+      fl.innerHTML = '<div style="color:var(--text2);font-size:13px;">暂无已上传的数据文件，请上传</div>';
+    }
+  } catch(e) {
+    document.getElementById('dataSourceInfo').innerHTML = '<span style="color:var(--red)">加载失败: ' + e.message + '</span>';
+  }
+}
+
+async function uploadDataFile(type) {
+  const inputId = type === 'detail' ? 'uploadDetail' : 'uploadOrder';
+  const file = document.getElementById(inputId).files[0];
+  if (!file) { alert('请先选择文件'); return; }
+
+  const status = document.getElementById('uploadStatus');
+  status.textContent = '⏳ 上传中...';
+  status.style.color = 'var(--text2)';
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('type', type);
+
+  try {
+    const r = await fetch('/api/data/upload', { method: 'POST', body: form });
+    const d = await r.json();
+    if (d.success) {
+      status.innerHTML = '✅ 上传成功！已替换 ' + d.filename + '，<a href="/" style="color:var(--accent);" onclick="switchTab(\'dashboard\');return false;">刷新看板</a> 查看最新数据';
+      status.style.color = 'var(--green)';
+      setTimeout(() => loadData(), 1000);
+    } else {
+      status.textContent = '❌ ' + (d.error || '上传失败');
+      status.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    status.textContent = '❌ ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+}
+
+// ── Chart Helpers ──
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+function renderLine(id, labels, data, label, color) {
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label, data, borderColor: color, backgroundColor: color + '20', fill: true, tension: 0.3, pointRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b8fa3' } } },
+      scales: { x: { ticks: { color: '#8b8fa3' } }, y: { ticks: { color: '#8b8fa3' }, beginAtZero: true } } }
+  });
+}
+
+function renderPie(id, labels, data) {
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx || !labels.length) return;
+  const colors = ['#6c8cff','#34d399','#fbbf24','#f87171','#a78bfa','#60a5fa','#f472b6','#94a3b8'];
+  charts[id] = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: colors.slice(0, labels.length) }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b8fa3', font: { size: 11 } } } } }
+  });
+}
+
+function renderBar(id, labels, datasets) {
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx || !labels.length) return;
+  const colors = ['#6c8cff','#34d399','#fbbf24','#f87171','#a78bfa','#60a5fa','#f472b6','#94a3b8'];
+  charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: datasets.map((d, i) => ({ ...d, backgroundColor: colors[i % colors.length], borderRadius: 3 })) },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+      scales: { x: { stacked: true, ticks: { color: '#8b8fa3' } }, y: { stacked: true, ticks: { color: '#8b8fa3' }, beginAtZero: true } } }
+  });
+}
+
+function renderMultiLine(id, labels, datasets) {
+  destroyChart(id);
+  const ctx = document.getElementById(id);
+  if (!ctx || !labels.length) return;
+  const colors = ['#6c8cff','#34d399','#fbbf24','#f87171','#a78bfa','#60a5fa','#f472b6','#94a3b8'];
+  charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: datasets.map((d, i) => ({ ...d, borderColor: colors[i % colors.length], backgroundColor: colors[i % colors.length] + '20', fill: false, tension: 0.3, pointRadius: 3 })) },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+      scales: { x: { ticks: { color: '#8b8fa3' } }, y: { ticks: { color: '#8b8fa3' }, beginAtZero: true } } }
+  });
+}
+
+// ── Init ──
+loadDashboard();
+
+
+// ── 表格合并 ──
+let _mergeState = { previewA: null, previewB: null };
+
+function uploadBoth() {
+  const fileA = document.getElementById('mergeFileA').files[0];
+  const fileB = document.getElementById('mergeFileB').files[0];
+  if (!fileA || !fileB) { alert('请选择两个文件'); return; }
+  document.getElementById('mergeUploadBtn').disabled = true;
+  document.getElementById('mergeUploadBtn').textContent = '上传中...';
+
+  Promise.all([uploadFile(fileA, 'file'), uploadFile(fileB, 'file')])
+    .then(([a, b]) => {
+      _mergeState.previewA = a;
+      _mergeState.previewB = b;
+      showMergePreview(a, b);
+      goMergeStep(2);
+    })
+    .catch(e => { alert('上传失败: ' + e.message); })
+    .finally(() => {
+      document.getElementById('mergeUploadBtn').disabled = false;
+      document.getElementById('mergeUploadBtn').textContent = '上传并预览';
+    });
+}
+
+function uploadFile(file, fieldName) {
+  const form = new FormData();
+  form.append(fieldName, file);
+  return fetch('/api/merge/preview', { method: 'POST', body: form }).then(r => r.json());
+}
+
+function showMergePreview(a, b) {
+  // Show headers as checkboxes
+  const colsA = document.getElementById('mergeColsA');
+  colsA.innerHTML = '<div style="margin-bottom:6px;color:var(--text2);">' + a.rows + ' 行, ' + a.columns + ' 列</div>'
+    + a.headers.map(h => '<label style="display:inline-block;margin:2px 6px 2px 0;font-size:12px;"><input type="checkbox" checked data-col="' + h + '"> ' + h + '</label>').join('');
+
+  const colsB = document.getElementById('mergeColsB');
+  colsB.innerHTML = '<div style="margin-bottom:6px;color:var(--text2);">' + b.rows + ' 行, ' + b.columns + ' 列</div>'
+    + b.headers.map(h => '<label style="display:inline-block;margin:2px 6px 2px 0;font-size:12px;"><input type="checkbox" checked data-col="' + h + '"> ' + h + '</label>').join('');
+
+  // Populate key selectors
+  const ka = document.getElementById('mergeKeyA');
+  ka.innerHTML = a.headers.map(h => '<option value="' + h + '">' + h + '</option>').join('');
+  const kb = document.getElementById('mergeKeyB');
+  kb.innerHTML = b.headers.map(h => '<option value="' + h + '">' + h + '</option>').join('');
+}
+
+function executeMerge() {
+  const a = _mergeState.previewA;
+  const b = _mergeState.previewB;
+  if (!a || !b) return;
+
+  const keyA = document.getElementById('mergeKeyA').value;
+  const keyB = document.getElementById('mergeKeyB').value;
+  const joinType = document.getElementById('mergeJoinType').value;
+
+  // Get selected columns
+  const colsA = Array.from(document.querySelectorAll('#mergeColsA input:checked')).map(el => el.dataset.col);
+  const colsB = Array.from(document.querySelectorAll('#mergeColsB input:checked')).map(el => el.dataset.col);
+
+  const form = new FormData();
+  // Re-upload files (they were already uploaded in step 1, but we stored preview paths)
+  // Actually we need to get the files again
+  const fileA = document.getElementById('mergeFileA').files[0];
+  const fileB = document.getElementById('mergeFileB').files[0];
+  form.append('file_a', fileA);
+  form.append('file_b', fileB);
+  form.append('key_a', keyA);
+  form.append('key_b', keyB);
+  form.append('join_type', joinType);
+  form.append('cols_a', JSON.stringify(colsA));
+  form.append('cols_b', JSON.stringify(colsB));
+
+  document.querySelector('#mergeConfig .gen-btn').textContent = '合并中...';
+  document.querySelector('#mergeConfig .gen-btn').disabled = true;
+
+  fetch('/api/merge/execute', { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert('错误: ' + data.error); return; }
+      showMergeResult(data);
+    })
+    .catch(e => { alert('合并失败: ' + e.message); })
+    .finally(() => {
+      document.querySelector('#mergeConfig .gen-btn').textContent = '执行合并';
+      document.querySelector('#mergeConfig .gen-btn').disabled = false;
+    });
+}
+
+function showMergeResult(data) {
+  goMergeStep(3);
+  document.getElementById('mergeStats').textContent =
+    '匹配 ' + data.match_count + ' 条, 合并结果 ' + data.total + ' 行 (A: ' + data.file_a_rows + ', B: ' + data.file_b_rows + ')';
+
+  const link = document.getElementById('mergeDownloadLink');
+  link.href = data.download_url;
+
+  const table = document.getElementById('mergeResultTable');
+  const thead = table.querySelector('thead');
+  thead.innerHTML = '<tr>' + data.headers.map(h => '<th>' + h + '</th>').join('') + '</tr>';
+  const tbody = table.querySelector('tbody');
+  const preview = data.preview || [];
+  tbody.innerHTML = preview.map(row =>
+    '<tr>' + row.map(v => '<td>' + (v ?? '') + '</td>').join('') + '</tr>'
+  ).join('');
+}
+
+function goMergeStep(step) {
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById('mergeStep' + i);
+    if (i === step) {
+      el.style.background = 'var(--accent2)';
+      el.style.color = '#fff';
+    } else {
+      el.style.background = 'var(--surface2)';
+      el.style.color = 'var(--text2)';
+    }
+  }
+  document.getElementById('mergeUpload').style.display = step === 1 ? 'block' : 'none';
+  document.getElementById('mergeConfig').style.display = step === 2 ? 'block' : 'none';
+  document.getElementById('mergeResult').style.display = step === 3 ? 'block' : 'none';
+}
+
+function resetMerge() {
+  _mergeState = { previewA: null, previewB: null };
+  document.getElementById('mergePreviewA').innerHTML = '';
+  document.getElementById('mergePreviewB').innerHTML = '';
+  document.getElementById('mergeColsA').innerHTML = '';
+  document.getElementById('mergeColsB').innerHTML = '';
+  document.getElementById('mergeResultTable').querySelector('thead').innerHTML = '';
+  document.getElementById('mergeResultTable').querySelector('tbody').innerHTML = '';
+  goMergeStep(1);
+}
+
+// File input change handlers
+document.addEventListener('DOMContentLoaded', function() {
+  // Data tab: show selected filename
+  document.getElementById('uploadDetail').addEventListener('change', function() {
+    document.getElementById('detailFileName').textContent = this.files[0] ? '已选: ' + this.files[0].name : '';
+  });
+  document.getElementById('uploadOrder').addEventListener('change', function() {
+    document.getElementById('orderFileName').textContent = this.files[0] ? '已选: ' + this.files[0].name : '';
+  });
+
+  // Merge tab: file selection UI
+  const fa = document.getElementById('mergeFileA');
+  const fb = document.getElementById('mergeFileB');
+  function updateUI() {
+    const hasA = fa.files[0];
+    const hasB = fb.files[0];
+    document.getElementById('mergeUploadBtn').disabled = !(hasA && hasB);
+    document.getElementById('mergeFileAName').textContent = hasA ? '✅ ' + fa.files[0].name : '点击选择文件 A';
+    document.getElementById('mergeFileBName').textContent = hasB ? '✅ ' + fb.files[0].name : '点击选择文件 B';
+    if (hasA && hasB) {
+      document.getElementById('mergeUploadBtn').textContent = '⚡ 上传并预览';
+    }
+  }
+  fa.addEventListener('change', updateUI);
+  fb.addEventListener('change', updateUI);
+});
+
+</script>
+</body>
+</html>

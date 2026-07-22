@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZOÉRA — 上传数据</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --surface: #1a1d28; --surface2: #232738;
+    --border: #2a2e3e; --text: #e4e6ee; --text2: #8b8fa3;
+    --accent: #6c8cff; --accent2: #4a6cf7;
+    --green: #34d399; --red: #f87171; --radius: 8px;
+  }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: var(--bg); color: var(--text); padding: 32px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.sub { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 16px; }
+  .btn { background: var(--accent); color: #fff; border: none; padding: 10px 28px; border-radius: 6px; font-size: 14px; cursor: pointer; display: inline-block; text-decoration: none; }
+  .btn:hover { opacity: .9; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-sm { padding: 6px 16px; font-size: 13px; }
+  .nav-link { color: var(--accent); text-decoration: none; font-size: 14px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; display: inline-block; margin-bottom: 16px; }
+  .nav-link:hover { background: var(--surface2); }
+  .drop-zone { border: 2px dashed var(--accent); border-radius: 12px; padding: 28px; text-align: center; cursor: pointer; background: var(--surface); }
+  .drop-zone:hover { background: var(--surface2); }
+  .step-bar { display: flex; gap: 8px; margin-bottom: 20px; }
+  .step { flex: 1; padding: 10px; border-radius: 6px; text-align: center; font-size: 13px; background: var(--surface2); color: var(--text2); }
+  .step.active { background: var(--accent2); color: #fff; }
+  label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 4px; margin-top: 8px; }
+  select, input { width: 100%; padding: 8px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; color: var(--text2); font-weight: 500; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; background: var(--surface2); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .hidden { display: none; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<a href="/" class="nav-link">← 返回看板</a>
+<h1>📤 上传 & 清洗</h1>
+<p class="sub">更新数据源 / 合并表格</p>
+
+<!-- ═══ 上传数据 ═══ -->
+<div class="card">
+  <div style="font-size:16px;font-weight:600;margin-bottom:16px;">📤 上传数据 — 更新看板</div>
+  <div class="row2">
+    <div style="text-align:center;">
+      <div style="font-size:14px;font-weight:500;margin-bottom:8px;">📋 纳新明细数据</div>
+      <form action="/api/data/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xlsx,.xls" required>
+        <input type="hidden" name="type" value="detail">
+        <button class="btn btn-sm" style="margin-top:8px;" type="submit">上传</button>
+      </form>
+    </div>
+    <div style="text-align:center;">
+      <div style="font-size:14px;font-weight:500;margin-bottom:8px;">🛒 到店订单数据</div>
+      <form action="/api/data/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xlsx,.xls" required>
+        <input type="hidden" name="type" value="order">
+        <button class="btn btn-sm" style="margin-top:8px;" type="submit">上传</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 数据清洗 ═══ -->
+<div class="card">
+  <div style="font-size:16px;font-weight:600;margin-bottom:4px;">🧹 数据清洗 — 合并表格</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">上传两个 Excel 文件，选择匹配列，合并导出</div>
+
+  <!-- 步骤条 -->
+  <div class="step-bar">
+    <div class="step active" id="ms1">1. 上传文件</div>
+    <div class="step" id="ms2">2. 选择匹配列</div>
+    <div class="step" id="ms3">3. 结果预览</div>
+  </div>
+
+  <!-- Step 1 -->
+  <div id="mergeUpload">
+    <div class="row2">
+      <div class="drop-zone" style="cursor:pointer;">
+        <div style="font-size:36px;margin-bottom:6px;">📂</div>
+        <div id="mergeNameA" style="font-size:14px;font-weight:500;">点击选择文件 A</div>
+        <div style="font-size:12px;color:var(--text2);">.xlsx / .xls</div>
+        <input type="file" id="mergeFileA" accept=".xlsx,.xls" style="font-size:13px;color:var(--text);padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:100%;margin-top:6px;box-sizing:border-box;">
+      </div>
+      <div class="drop-zone" style="cursor:pointer;">
+        <div style="font-size:36px;margin-bottom:6px;">📂</div>
+        <div id="mergeNameB" style="font-size:14px;font-weight:500;">点击选择文件 B</div>
+        <div style="font-size:12px;color:var(--text2);">.xlsx / .xls</div>
+        <input type="file" id="mergeFileB" accept=".xlsx,.xls" style="font-size:13px;color:var(--text);padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:100%;margin-top:6px;box-sizing:border-box;">
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:12px;">
+      <button class="btn" id="mergeBtn" onclick="doMergeUpload()" disabled>⚡ 开始处理</button>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div id="mergeConfig" style="display:none;">
+    <div class="row2">
+      <div><div style="font-size:13px;color:var(--text2);margin-bottom:6px;">文件 A 列</div><div id="mergeColsA" style="max-height:200px;overflow-y:auto;font-size:12px;"></div></div>
+      <div><div style="font-size:13px;color:var(--text2);margin-bottom:6px;">文件 B 列</div><div id="mergeColsB" style="max-height:200px;overflow-y:auto;font-size:12px;"></div></div>
+    </div>
+    <div style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;">
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+        <div style="flex:1;">
+          <label>文件 A 匹配列 <span style="color:var(--text2);font-weight:400;">（从下方勾选的列中选一列）</span></div>
+          <input type="text" id="mergeKeyA" placeholder="输入列名，如 客户账号" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;">
+        </div>
+        <div style="font-size:24px;color:var(--text2);margin-top:16px;">↔</div>
+        <div style="flex:1;">
+          <label>文件 B 匹配列 <span style="color:var(--text2);font-weight:400;">（从下方勾选的列中选一列）</span></div>
+          <input type="text" id="mergeKeyB" placeholder="输入列名，如 客户账户号" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;">
+        </div>
+        <div style="flex:1;">
+          <label>合并方式</div>
+          <select id="mergeJoin" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;">
+            <option value="inner">内连接（仅匹配项）</option>
+            <option value="left">左连接（保留 A 全部）</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:12px;">
+      <button class="btn btn-sm" onclick="step(1)" style="background:var(--surface2);color:var(--text);">← 返回重选</button>
+      <button class="btn btn-sm" onclick="doMergeExec()" style="margin-left:8px;">▶ 执行合并</button>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div id="mergeResult" style="display:none;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <span id="mergeStats" style="font-size:14px;color:var(--text2);"></span>
+      <a id="mergeDl" class="btn btn-sm" style="text-decoration:none;">📥 下载 CSV</a>
+      <button class="btn btn-sm" onclick="resetMerge()" style="background:var(--surface2);color:var(--text);">↺ 重新开始</button>
+    </div>
+    <div style="max-height:400px;overflow:auto;border:1px solid var(--border);border-radius:6px;">
+      <table id="mergeTable"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;font-size:12px;color:var(--text2);text-align:center;">
+  <a href="/test.html" style="color:var(--accent);">test.html</a>
+</div>
+
+<script>
+// ── 数据清洗 ──
+let _mA = null, _mB = null;
+const $ = id => document.getElementById(id);
+
+// Drop zone click handlers
+// clicks handled by <label>
+
+$('mergeFileA').onchange = upd;
+$('mergeFileB').onchange = upd;
+
+function upd() {
+  const a = $('mergeFileA').files[0];
+  const b = $('mergeFileB').files[0];
+  $('mergeNameA').textContent = a ? '✅ ' + a.name : '点击选择文件 A';
+  $('mergeNameB').textContent = b ? '✅ ' + b.name : '点击选择文件 B';
+  $('mergeBtn').disabled = !(a && b);
+}
+
+function step(n) {
+  $('ms1').className = 'step' + (n===1?' active':'');
+  $('ms2').className = 'step' + (n===2?' active':'');
+  $('ms3').className = 'step' + (n===3?' active':'');
+  $('mergeUpload').style.display = n===1 ? 'block' : 'none';
+  $('mergeConfig').style.display = n===2 ? 'block' : 'none';
+  $('mergeResult').style.display = n===3 ? 'block' : 'none';
+}
+
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/merge/preview', { method: 'POST', body: fd });
+  return r.json();
+}
+
+async function doMergeUpload() {
+  const a = $('mergeFileA').files[0];
+  const b = $('mergeFileB').files[0];
+  if (!a || !b) return;
+  $('mergeBtn').disabled = true;
+  $('mergeBtn').textContent = '⏳ 上传中...';
+  try {
+    const [ra, rb] = await Promise.all([uploadFile(a), uploadFile(b)]);
+    if (ra.error || rb.error) { alert(ra.error || rb.error); return; }
+    _mA = ra; _mB = rb;
+    showCols();
+    step(2);
+  } catch(e) { alert('上传失败: ' + e.message); }
+  $('mergeBtn').disabled = false;
+  $('mergeBtn').textContent = '⚡ 开始处理';
+}
+
+function showCols() {
+  const a = _mA, b = _mB;
+  const wrap = (h) => '<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 8px 2px 0;font-size:12px;cursor:pointer;"><input type="checkbox" checked data-col="'+h+'"> '+h+'</label>';
+  $('mergeColsA').innerHTML = '<div style="color:var(--text2);margin-bottom:4px;">'+a.rows+' 行</div><div style="line-height:1.8;">' + a.headers.map(wrap).join('') + '</div>';
+  $('mergeColsB').innerHTML = '<div style="color:var(--text2);margin-bottom:4px;">'+b.rows+' 行</div><div style="line-height:1.8;">' + b.headers.map(wrap).join('') + '</div>';
+  // 预填匹配建议（如果两个文件的表头中有相同列名）
+  for (const ha of a.headers) {
+    for (const hb of b.headers) {
+      if (ha === hb) {
+        $('mergeKeyA').value = ha;
+        $('mergeKeyB').value = hb;
+        return;
+      }
+    }
+  }
+}
+
+async function doMergeExec() {
+  const keyA = $('mergeKeyA').value.trim();
+  const keyB = $('mergeKeyB').value.trim();
+  if (!keyA || !keyB) { alert('请填写两个文件的匹配列名'); return; }
+
+  const fd = new FormData();
+  fd.append('file_a', $('mergeFileA').files[0]);
+  fd.append('file_b', $('mergeFileB').files[0]);
+  fd.append('key_a', keyA);
+  fd.append('key_b', keyB);
+  fd.append('join_type', $('mergeJoin').value);
+
+  const colsA = Array.from($('mergeColsA').querySelectorAll('input:checked')).map(e => e.dataset.col);
+  const colsB = Array.from($('mergeColsB').querySelectorAll('input:checked')).map(e => e.dataset.col);
+  fd.append('cols_a', JSON.stringify(colsA));
+  fd.append('cols_b', JSON.stringify(colsB));
+
+  try {
+    const r = await fetch('/api/merge/execute', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { alert('❌ ' + d.error); return; }
+    showResult(d);
+  } catch(e) { alert('合并失败: ' + e.message); }
+}
+
+function showResult(d) {
+  step(3);
+  $('mergeStats').textContent = '匹配 ' + d.match_count + ' 条，合并 ' + d.total + ' 行';
+  $('mergeDl').href = d.download_url;
+  const tbl = $('mergeTable');
+  tbl.querySelector('thead').innerHTML = '<tr>' + d.headers.map(h => '<th>'+h+'</th>').join('') + '</tr>';
+  const rows = d.preview || [];
+  tbl.querySelector('tbody').innerHTML = rows.map(r => '<tr>'+r.map(v => '<td>'+(v??'')+'</td>').join('')+'</tr>').join('');
+}
+
+function resetMerge() {
+  _mA = _mB = null;
+  step(1);
+}
+
+
+// ── 单表去重 ──
+let _dedupHeaders = null;
+
+// click handled by <label>
+document.getElementById('dedupFile').onchange = async function() {
+  const f = this.files[0];
+  if (!f) return;
+  document.getElementById('dedupFileName').textContent = '✅ ' + f.name;
+  
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/merge/preview', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    _dedupHeaders = d.headers;
+    document.getElementById('dedupCols').innerHTML = d.headers.map(h =>
+      '<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 6px;font-size:12px;cursor:pointer;"><input type="checkbox" data-col="'+h+'"> '+h+'</label>'
+    ).join('');
+    document.getElementById('dedupBtn').disabled = false;
+  } catch(e) { alert('读取失败: ' + e.message); }
+};
+
+async function doDedup() {
+  const cols = Array.from(document.querySelectorAll('#dedupCols input:checked')).map(e => e.dataset.col);
+  if (!cols.length) { alert('请勾选要去重的列'); return; }
+
+  const file = document.getElementById('dedupFile').files[0];
+  if (!file) return;
+
+  const btn = document.getElementById('dedupBtn');
+  btn.disabled = true; btn.textContent = '⏳ 处理中...';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('key_columns', JSON.stringify(cols));
+  fd.append('keep', document.getElementById('dedupKeep').value);
+
+  try {
+    const r = await fetch('/api/dedup/execute', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { alert('错误: ' + d.error); return; }
+    const el = document.getElementById('dedupResult');
+    el.style.display = 'block';
+    document.getElementById('dedupStats').textContent =
+      '原 ' + d.original + ' 行 → 去重后 ' + d.total + ' 行（移除 ' + d.removed + ' 行重复）';
+    document.getElementById('dedupDl').href = d.download_url;
+  } catch(e) { alert('去重失败: ' + e.message); }
+  btn.disabled = false; btn.textContent = '▶ 执行去重';
+}
+
+function resetDedup() {
+  document.getElementById('dedupResult').style.display = 'none';
+  _dedupHeaders = null;
+}
+
+
+
+// ── 双表去重 ──
+// click handled by <label>
+// click handled by <label>
+document.getElementById('subMasterFile').onchange = function() {
+  document.getElementById('subMasterName').textContent = this.files[0] ? '✅ ' + this.files[0].name : '点击选择主表';
+};
+document.getElementById('subLookupFile').onchange = function() {
+  document.getElementById('subLookupName').textContent = this.files[0] ? '✅ ' + this.files[0].name : '点击选择查重表';
+};
+
+async function doSubtract() {
+  const mf = document.getElementById('subMasterFile').files[0];
+  const lf = document.getElementById('subLookupFile').files[0];
+  const km = document.getElementById('subKeyM').value.trim();
+  const kl = document.getElementById('subKeyL').value.trim();
+  if (!mf || !lf) { alert('请选择两个文件'); return; }
+  if (!km || !kl) { alert('请填写匹配列名'); return; }
+
+  const btn = document.getElementById('subBtn');
+  btn.disabled = true; btn.textContent = '⏳ 处理中...';
+
+  const fd = new FormData();
+  fd.append('master_file', mf);
+  fd.append('lookup_file', lf);
+  fd.append('key_master', km);
+  fd.append('key_lookup', kl);
+
+  try {
+    const r = await fetch('/api/subtract/execute', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { alert('❌ ' + d.error); return; }
+    document.getElementById('subResult').style.display = 'block';
+    document.getElementById('subStats').textContent =
+      '主表 ' + d.original + ' 行 → 删除 ' + d.removed + ' 行 → 剩余 ' + d.total + ' 行';
+    document.getElementById('subDl').href = d.download_url;
+  } catch(e) { alert('失败: ' + e.message); }
+  btn.disabled = false; btn.textContent = '▶ 执行去重';
+}
+</script>
+
+
+<!-- ═══ 单表去重 ═══ -->
+<div class="card">
+  <div style="font-size:16px;font-weight:600;margin-bottom:4px;">🗑  单表去重 — 删除重复行</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">上传一个 Excel，按指定列去重，生成新表格</div>
+
+  <div style="display:flex;gap:16px;">
+    <div class="drop-zone" style="flex:1;cursor:pointer;">
+      <div style="font-size:36px;margin-bottom:6px;">📄</div>
+      <div id="dedupFileName" style="font-size:14px;font-weight:500;">点击选择文件</div>
+      <div style="font-size:12px;color:var(--text2);">.xlsx / .xls</div>
+      <input type="file" id="dedupFile" accept=".xlsx,.xls" style="font-size:13px;color:var(--text);padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:100%;margin-top:6px;box-sizing:border-box;">
+    </div>
+    <div style="flex:1;padding:16px;background:var(--surface2);border-radius:8px;">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:6px;">按哪些列判断重复？</div>
+      <div id="dedupCols" style="max-height:160px;overflow-y:auto;font-size:12px;line-height:1.8;">
+        <div style="color:var(--text2);font-style:italic;">先上传文件，自动加载列名</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;align-items:center;margin-top:12px;">
+    <label style="font-size:13px;color:var(--text2);">保留策略</div>
+    <select id="dedupKeep" style="padding:6px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:13px;">
+      <option value="first">保留首次出现的行</option>
+      <option value="last">保留最后一次出现的行</option>
+    </select>
+    <button class="btn btn-sm" id="dedupBtn" onclick="doDedup()" disabled>▶ 执行去重</button>
+  </div>
+
+  <div id="dedupResult" style="display:none;margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;">
+    <div id="dedupStats" style="font-size:14px;margin-bottom:8px;"></div>
+    <a id="dedupDl" class="btn btn-sm" style="text-decoration:none;">📥 下载 CSV</a>
+    <button class="btn btn-sm" onclick="resetDedup()" style="background:var(--surface2);color:var(--text);margin-left:8px;">↺ 重新选择</button>
+  </div>
+</div>
+
+
+
+<!-- ═══ 双表去重 ═══ -->
+<div class="card">
+  <div style="font-size:16px;font-weight:600;margin-bottom:4px;">🔀 双表去重 — 在主表里删除查重表中出现的数据</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">上传主表和查重表，指定匹配列，主表中匹配到的行会被删除</div>
+  <div class="row2" style="margin-bottom:12px;">
+    <div class="drop-zone" style="padding:20px;cursor:pointer;">
+      <div style="font-size:28px;margin-bottom:4px;">📋</div>
+      <div id="subMasterName" style="font-size:14px;font-weight:500;">点击选择主表</div>
+      <div style="font-size:11px;color:var(--text2);">要从中删除数据的表</div>
+      <input type="file" id="subMasterFile" accept=".xlsx,.xls" style="font-size:13px;color:var(--text);padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:100%;margin-top:6px;box-sizing:border-box;">
+    </div>
+    <div class="drop-zone" style="padding:20px;cursor:pointer;">
+      <div style="font-size:28px;margin-bottom:4px;">🔍</div>
+      <div id="subLookupName" style="font-size:14px;font-weight:500;">点击选择查重表</div>
+      <div style="font-size:11px;color:var(--text2);">包含要查找并删除的数据的表</div>
+      <input type="file" id="subLookupFile" accept=".xlsx,.xls" style="font-size:13px;color:var(--text);padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:100%;margin-top:6px;box-sizing:border-box;">
+    </div>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px;background:var(--surface2);border-radius:8px;">
+    <div style="flex:1;"><label>主表匹配列</label><input type="text" id="subKeyM" placeholder="如 客户账号" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;"></div>
+    <div style="font-size:20px;color:var(--text2);margin-top:12px;">↔</div>
+    <div style="flex:1;"><label>查重表匹配列</label><input type="text" id="subKeyL" placeholder="如 客户账户号" style="width:100%;padding:8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:14px;"></div>
+    <div><button class="btn btn-sm" id="subBtn" onclick="doSubtract()" style="margin-top:12px;">▶ 执行去重</button></div>
+  </div>
+  <div id="subResult" style="display:none;margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;">
+    <div id="subStats" style="font-size:14px;margin-bottom:8px;"></div>
+    <a id="subDl" class="btn btn-sm" style="text-decoration:none;">📥 下载 CSV</a>
+  </div>
+</div>
+</body>
+</html>

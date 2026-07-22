@@ -1,0 +1,15 @@
+name: meitian-data-cleaning
+region: fra
+app:
+  env:
+    - key: HOST
+      value: 0.0.0.0
+  routes:
+    - path: /
+      port: 8899
+  source:
+    github:
+      branch: main
+      build:
+        command: pip install -r requirements.txt
+      run: bash start.sh
